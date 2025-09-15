@@ -3,12 +3,11 @@
 use bytes::Bytes;
 use serde_json;
 use serde_bencode;
+use serde_urlencoded;
 use anyhow::Result;
-use std::{
-    fs,
-    collections,
-};
+use std::{fs, collections};
 
+use crate::magnet::MagnetLink;
 use crate::torrent::TorrentFile;
 use crate::tracker::TrackerResponse;
 
@@ -57,5 +56,15 @@ pub fn decode_torrent_file(file_name: &str) -> Result<TorrentFile> {
 // Decode tracker response
 pub fn decode_tracker_response(raw_response: &Bytes) -> Result<TrackerResponse> {
     let content: TrackerResponse = serde_bencode::from_bytes(raw_response)?;
+    Ok(content)
+}
+
+// Decode magnet link
+pub fn decode_magnet_link(raw_link: &str) -> Result<MagnetLink> {
+    let clean_link = match raw_link.starts_with("magnet:?") {
+        true => raw_link.strip_prefix("magnet:?").unwrap(),
+        false => raw_link,
+    };
+    let content: MagnetLink = serde_urlencoded::from_str(clean_link)?;
     Ok(content)
 }

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use hex;
 
-use crate::encoder;
+use crate::magnet::MagnetLink;
 use crate::torrent::TorrentFile;
 use crate::tracker::TrackerResponse;
 
@@ -14,8 +14,7 @@ pub fn print_torrent(torrent: &TorrentFile) -> Result<()> {
     println!("Length: {}", torrent.info.length);
 
     // print info hash
-    let bencoded_info = encoder::encode_bencode(&torrent.info)?;
-    let info_hash = encoder::encode_sha1(&bencoded_info)?;
+    let info_hash = torrent.get_hash()?;
     let info_hash_string = hex::encode(info_hash);
     println!("Info Hash: {info_hash_string}");
 
@@ -35,4 +34,10 @@ pub fn print_peers(tracker_response: &TrackerResponse) {
     for socket_addr in tracker_response.peers.iter() {
         println!("{socket_addr}");
     }
+}
+
+// Command "magnet_parse" printing
+pub fn print_magnet(magnet_info: &MagnetLink) {
+    println!("Tracker URL: {}", magnet_info.tr);
+    println!("Info Hash: {}", magnet_info.get_hex_hash());
 }
