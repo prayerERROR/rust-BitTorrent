@@ -33,6 +33,16 @@ pub fn handshake_message(
     message
 }
 
+pub fn piece_request_message(piece_index: u32, offset: u32, length: u32) -> Vec<u8> {
+    let mut message = vec![0u8; 17];
+    message[3] = 13; // request message has 13 byres (1 message type, 12 payload)
+    message[4] = 6; // message type, 6 -> request type
+    message[5..9].copy_from_slice(&piece_index.to_be_bytes());
+    message[9..13].copy_from_slice(&offset.to_be_bytes());
+    message[13..17].copy_from_slice(&length.to_be_bytes());
+    message
+}
+
 pub fn extension_handshake_message() -> Result<Vec<u8>> {
     let m_dict = MDict{ ut_metadata: 1 };
     let eh_dict = ExtensionHandshakeDict{ m: m_dict };

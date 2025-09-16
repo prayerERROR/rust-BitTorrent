@@ -50,92 +50,6 @@ impl Peer {
         Ok(buffer.to_vec())
     }
 
-    // Download a piece from peer
-    pub async fn download_piece(&self, piece_index: u32, file_path: &str, piece_offset: u64) -> Result<()> {
-        // Step1 connect peer
-        let mut stream = TcpStream::connect(self.peer_addr).await?;
-
-        // Step2 send handshake message
-        let handshake_message = {
-            let mut message: Vec<u8> = Vec::new();
-            message.push(19); // Protocol string length
-            message.extend_from_slice(b"BitTorrent protocol"); // Protocol string
-            message.extend_from_slice(&[0u8; 8]); // Reserved bytes
-            message.extend_from_slice(&self.torrent.get_hash()?);
-            message.extend_from_slice(&Self::gen_peer_id());
-            message
-        };
-        stream.write_all(&handshake_message).await?;
-
-
-        // Step3 read handshake response
-        let mut buffer = [0u8; 68];
-        stream.read_exact(&mut buffer).await?;
-        
-        // Step4 read bitfield message
-        let mut length_bytes = [0u8; 4];
-        stream.read_exact(&mut length_bytes).await?;
-        let length = u32::from_be_bytes(length_bytes);
-        let mut buffer = vec![0u8; length as usize];
-        stream.read_exact(&mut buffer).await?;
-
-        // Step5 send interest message
-        let message: [u8; 5] = [0, 0, 0, 1, 2];
-        stream.write_all(&message).await?;
-
-        // Step6 recive unchocked message
-        let mut length_bytes = [0u8; 4];
-        stream.read_exact(&mut length_bytes).await?;
-        let length = u32::from_be_bytes(length_bytes);
-        let mut buffer = vec![0u8; length as usize];
-        stream.read_exact(&mut buffer).await?;
-
-        // Step7 send piece requests
-        let piece_length = self.torrent.get_piece_length_real(piece_index);
-        let block_size: u32 = 16384;
-        let blocks = piece_length.div_ceil(block_size);
-
-        for block_idx in 0..blocks {
-            let offset = block_idx * block_size;
-            let length = 16384u32.min(piece_length - offset);
-            let mut request_message = [0u8; 17];
-            request_message[3] = 13; // request message has 13 byres (1 message type, 12 payload)
-            request_message[4] = 6; // message type, 6 -> request type
-            request_message[5..9].copy_from_slice(&piece_index.to_be_bytes());
-            request_message[9..13].copy_from_slice(&offset.to_be_bytes());
-            request_message[13..17].copy_from_slice(&length.to_be_bytes());
-            stream.write_all(&request_message).await?;
-        }
-
-        // Step8 read piece data
-        let mut piece_buffer = vec![0u8; piece_length as usize];
-        for _ in 0..blocks {
-            let mut length_bytes = [0u8; 4];
-            stream.read_exact(&mut length_bytes).await?;
-            let length = u32::from_be_bytes(length_bytes);
-            let mut buffer = vec![0u8; length as usize];
-            stream.read_exact(&mut buffer).await?;
-
-            let offset = u32::from_be_bytes([buffer[5], buffer[6], buffer[7], buffer[8]]) as usize;
-            let block_data = &buffer[9..];
-            let (start, end) = (offset, offset + block_data.len());
-            piece_buffer[start..end].copy_from_slice(block_data);
-        }
-
-        // Step9 save piece file
-        let mut file = File::options().write(true).open(file_path).await?;
-        file.seek(SeekFrom::Start(piece_offset)).await?;
-        file.write_all(&piece_buffer).await?;
-        file.flush().await?;
-
-        Ok(())
-    }
-
-    // download whole file
-    // pub async fn download_file(&self, file_path: &str) -> Result<()> {
-    //     unimplemented!()
-    // }
-
     // randomly generate a peer id
     pub fn gen_peer_id() -> [u8; 20] {
         let mut peer_id = [0u8; 20];
@@ -146,6 +60,82 @@ impl Peer {
     }
 }
 
+
+
+// Download a piece from peer
+pub async fn download_piece(
+    peer_addr: SocketAddrV4,
+    info: &TorrentInfo,
+    piece_index: u32,
+    file_path: &str,
+    piece_offset: u64
+) -> Result<()> {
+    // Step1 connect peer
+    let mut stream = TcpStream::connect(peer_addr).await?;
+    let peer_id = Peer::gen_peer_id();
+    let info_hash = info.get_hash()?;
+
+    // Step2 send handshake message
+    let handshake_message = message::handshake_message(&info_hash, &peer_id, false);
+    stream.write_all(&handshake_message).await?;
+
+    // Step3 read handshake response
+    let mut buffer = [0u8; 68];
+    stream.read_exact(&mut buffer).await?;
+    
+    // Step4 read bitfield message
+    let mut length_bytes = [0u8; 4];
+    stream.read_exact(&mut length_bytes).await?;
+    let length = u32::from_be_bytes(length_bytes);
+    let mut buffer = vec![0u8; length as usize];
+    stream.read_exact(&mut buffer).await?;
+
+    // Step5 send interest message
+    let message: [u8; 5] = [0, 0, 0, 1, 2];
+    stream.write_all(&message).await?;
+
+    // Step6 recive unchocked message
+    let mut length_bytes = [0u8; 4];
+    stream.read_exact(&mut length_bytes).await?;
+    let length = u32::from_be_bytes(length_bytes);
+    let mut buffer = vec![0u8; length as usize];
+    stream.read_exact(&mut buffer).await?;
+
+    // Step7 send piece requests
+    let piece_length = info.get_piece_length_real(piece_index);
+    let block_size: u32 = 16384;
+    let blocks = piece_length.div_ceil(block_size);
+
+    for block_idx in 0..blocks {
+        let offset = block_idx * block_size;
+        let length = 16384u32.min(piece_length - offset);
+        let request_message = message::piece_request_message(piece_index, offset, length);
+        stream.write_all(&request_message).await?;
+    }
+
+    // Step8 read piece data
+    let mut piece_buffer = vec![0u8; piece_length as usize];
+    for _ in 0..blocks {
+        let mut length_bytes = [0u8; 4];
+        stream.read_exact(&mut length_bytes).await?;
+        let length = u32::from_be_bytes(length_bytes);
+        let mut buffer = vec![0u8; length as usize];
+        stream.read_exact(&mut buffer).await?;
+
+        let offset = u32::from_be_bytes([buffer[5], buffer[6], buffer[7], buffer[8]]) as usize;
+        let block_data = &buffer[9..];
+        let (start, end) = (offset, offset + block_data.len());
+        piece_buffer[start..end].copy_from_slice(block_data);
+    }
+
+    // Step9 save piece file
+    let mut file = File::options().write(true).open(file_path).await?;
+    file.seek(SeekFrom::Start(piece_offset)).await?;
+    file.write_all(&piece_buffer).await?;
+    file.flush().await?;
+
+    Ok(())
+}
 
 // magnet handshake (support extension) 
 pub async fn magnet_handshake(

@@ -16,18 +16,15 @@ pub struct TorrentFile {
 
 impl TorrentFile {
     pub fn get_hash(&self) -> Result<Vec<u8>> {
-        let bencoded_info = encoder::encode_bencode(&self.info)?;
-        let hash = encoder::encode_sha1(&bencoded_info)?;
-        Ok(hash)
+        self.info.get_hash()
     }
 
     pub fn get_piece_length_real(&self, piece_index: u32) -> u32 {
-        let piece_length = self.info.piece_length as u64;
-        piece_length.min(self.info.length - piece_index as u64 * piece_length as u64) as u32
+        self.info.get_piece_length_real(piece_index)
     }
 
     pub fn get_piece_num(&self) -> usize {
-        self.info.pieces.len() / 20
+        self.info.get_piece_num()
     }
 
     pub fn track_request(&self) -> Result<reqwest::blocking::Response> {
@@ -67,4 +64,21 @@ pub struct TorrentInfo {
     pub piece_length: u32,
     #[serde(with="serde_bytes")]
     pub pieces: Vec<u8>,
+}
+
+impl TorrentInfo {
+    pub fn get_hash(&self) -> Result<Vec<u8>> {
+        let bencoded_info = encoder::encode_bencode(&self)?;
+        let hash = encoder::encode_sha1(&bencoded_info)?;
+        Ok(hash)
+    }
+
+    pub fn get_piece_length_real(&self, piece_index: u32) -> u32 {
+        let piece_length = self.piece_length as u64;
+        piece_length.min(self.length - piece_index as u64 * piece_length as u64) as u32
+    }
+
+    pub fn get_piece_num(&self) -> usize {
+        self.pieces.len() / 20
+    }
 }
